@@ -1,0 +1,10 @@
+import telebot import os
+Telegram bot token
+TOKEN = "7957571509:AAFG8ZB6GeJ5B4AwHQEY7frz6UFZH_zaSJI" bot = telebot.TeleBot(TOKEN)
+Temporary dictionary to store wallet addresses
+user_wallets = {}
+@bot.message_handler(commands=['start']) def send_welcome(message): user_id = message.from_user.id ref_code = message.text.split(" ")[-1] if len(message.text.split()) > 1 else None
+welcome_text = f"Hi {message.from_user.first_name} 👋\n\nWelcome to the KIMO Airdrop!\nPlease send your ICB wallet address 🪙" bot.send_message(message.chat.id, welcome_text) if ref_code: with open("referrals.txt", "a") as f: f.write(f"User: {user_id} referred by: {ref_code}\n") 
+@bot.message_handler(func=lambda message: True) def handle_wallet(message): user_id = message.from_user.id text = message.text.strip()
+if user_id not in user_wallets: user_wallets[user_id] = text with open("wallets.txt", "a") as f: f.write(f"{user_id}: {text}\n") ref_link = f"https://t.me/{bot.get_me().username}?start={user_id}" bot.send_message(message.chat.id, f"✅ Your wallet address has been saved!\n\n📣 Your referral link:\n{ref_link}") else: bot.send_message(message.chat.id, "You have already submitted your wallet ✅") 
+bot.polling()
