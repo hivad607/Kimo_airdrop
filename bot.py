@@ -1,1 +1,39 @@
-import telebot import os # Get token from environment variable TOKEN = os.getenv("BOT_TOKEN") bot = telebot.TeleBot(TOKEN) # Temporary dictionary to store wallet addresses user_wallets = {} @bot.message_handler(commands=['start']) def send_welcome(message): user_id = message.from_user.id ref_code = message.text.split(" ")[-1] if len(message.text.split()) > 1 else None welcome_text = f"Hi {message.from_user.first_name} 👋\n\nWelcome to the KIMO Airdrop!\nPlease send your ICB wallet address 🪙" bot.send_message(message.chat.id, welcome_text) if ref_code: with open("referrals.txt", "a") as f: f.write(f"User: {user_id} referred by: {ref_code}\n") @bot.message_handler(func=lambda message: True) def handle_wallet(message): user_id = message.from_user.id text = message.text.strip() if user_id not in user_wallets: user_wallets[user_id] = text with open("wallets.txt", "a") as f: f.write(f"{user_id}: {text}\n") ref_link = f"https://t.me/{bot.get_me().username}?start={user_id}" bot.send_message(message.chat.id, f"✅ Your wallet address has been saved!\n\n📣 Your referral link:\n{ref_link}") else: bot.send_message(message.chat.id, "You have already submitted your wallet ✅") bot.polling()
+import logging import sqlite3 from datetime import datetime, timedelta from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes import os from dotenv import load_dotenv
+
+Load environment variables
+
+load_dotenv() TOKEN = os.getenv("BOT_TOKEN")
+
+Enable logging
+
+logging.basicConfig( format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO ) logger = logging.getLogger(name)
+
+Connect to SQLite DB
+
+conn = sqlite3.connect('kimo_bot.db', check_same_thread=False) cursor = conn.cursor()
+
+cursor.execute('''CREATE TABLE IF NOT EXISTS users ( user_id INTEGER PRIMARY KEY, username TEXT, balance INTEGER DEFAULT 0, last_claim TEXT )''') conn.commit()
+
+Constants
+
+REWARD = 1 # 1 KIMO per day COOLDOWN_HOURS = 24
+
+Start command
+
+def start(update: Update, context: ContextTypes.DEFAULT_TYPE): user_id = update.effective_user.id username = update.effective_user.username cursor.execute("SELECT * FROM users WHERE user_id=?", (user_id,)) user = cursor.fetchone() if not user: cursor.execute("INSERT INTO users (user_id, username, balance, last_claim) VALUES (?, ?, ?, ?)", (user_id, username, 0, None)) conn.commit() keyboard = [[InlineKeyboardButton("🔥 Claim KIMO", callback_data='claim')]] reply_markup = InlineKeyboardMarkup(keyboard) update.message.reply_text("Welcome to KIMO PowerTap!", reply_markup=reply_markup)
+
+Balance command
+
+def balance(update: Update, context: ContextTypes.DEFAULT_TYPE): user_id = update.effective_user.id cursor.execute("SELECT balance FROM users WHERE user_id=?", (user_id,)) result = cursor.fetchone() bal = result[0] if result else 0 update.message.reply_text(f"💰 Your current balance: {bal} KIMO")
+
+Claim callback
+
+def claim(update: Update, context: ContextTypes.DEFAULT_TYPE): query = update.callback_query user_id = query.from_user.id cursor.execute("SELECT balance, last_claim FROM users WHERE user_id=?", (user_id,)) user = cursor.fetchone()
+
+now = datetime.utcnow() if user: last_claim_str = user[1] if last_claim_str: last_claim = datetime.strptime(last_claim_str, "%Y-%m-%d %H:%M:%S") if now - last_claim < timedelta(hours=COOLDOWN_HOURS): remaining = timedelta(hours=COOLDOWN_HOURS) - (now - last_claim) query.answer(text=f"⏳ You already claimed! Try again in {str(remaining).split('.')[0]}") return new_balance = user[0] + REWARD cursor.execute("UPDATE users SET balance=?, last_claim=? WHERE user_id=?", (new_balance, now.strftime("%Y-%m-%d %H:%M:%S"), user_id)) conn.commit() query.answer(text="✅ KIMO Claimed!") query.edit_message_text(f"You received {REWARD} KIMO! 💸") else: query.answer(text="❗️ Please use /start first.") 
+
+Main
+
+if name == 'main': app = ApplicationBuilder().token(TOKEN).build()
+
+app.add_handler(CommandHandler("start", start)) app.add_handler(CommandHandler("balance", balance)) app.add_handler(CallbackQueryHandler(claim, pattern='^claim$')) app.run_polling()
